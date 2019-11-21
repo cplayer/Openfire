@@ -25,16 +25,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xmpp.packet.JID;
 
+import javax.naming.NamingEnumeration;
+import javax.naming.directory.Attribute;
+import javax.naming.directory.Attributes;
+import javax.naming.directory.DirContext;
+import javax.naming.ldap.Rdn;
 import java.text.MessageFormat;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
-import javax.naming.NamingEnumeration;
-import javax.naming.directory.Attribute;
-import javax.naming.directory.Attributes;
-import javax.naming.directory.DirContext;
 
 /**
  * LDAP implementation of the UserProvider interface. All data in the directory is
@@ -94,14 +95,14 @@ public class LdapUserProvider implements UserProvider {
         username = JID.unescapeNode(username);
         DirContext ctx = null;
         try {
-            String userDN = manager.findUserDN(username);
+            Rdn[] userRDN = manager.findUserRDN(username);
             // Load record.
             String[] attributes = new String[]{
                 manager.getUsernameField(), manager.getNameField(),
                 manager.getEmailField(), "createTimestamp", "modifyTimestamp"
             };
             ctx = manager.getContext(manager.getUsersBaseDN(username));
-            Attributes attrs = ctx.getAttributes(userDN, attributes);
+            Attributes attrs = ctx.getAttributes(LdapManager.escapeForJNDI(userRDN), attributes);
             String name = null;
             Attribute nameField = attrs.get(manager.getNameField());
             if (nameField != null) {
