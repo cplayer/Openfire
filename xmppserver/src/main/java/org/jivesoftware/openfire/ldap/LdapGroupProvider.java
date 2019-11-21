@@ -16,23 +16,6 @@
 
 package org.jivesoftware.openfire.ldap;
 
-import java.text.MessageFormat;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
-import javax.naming.NamingEnumeration;
-import javax.naming.NamingException;
-import javax.naming.directory.Attribute;
-import javax.naming.directory.Attributes;
-import javax.naming.directory.SearchControls;
-import javax.naming.directory.SearchResult;
-import javax.naming.ldap.LdapContext;
-import javax.naming.ldap.LdapName;
-
 import org.jivesoftware.openfire.XMPPServer;
 import org.jivesoftware.openfire.group.AbstractGroupProvider;
 import org.jivesoftware.openfire.group.Group;
@@ -43,6 +26,21 @@ import org.jivesoftware.util.JiveConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xmpp.packet.JID;
+
+import javax.naming.NamingEnumeration;
+import javax.naming.NamingException;
+import javax.naming.directory.Attribute;
+import javax.naming.directory.Attributes;
+import javax.naming.directory.SearchControls;
+import javax.naming.directory.SearchResult;
+import javax.naming.ldap.LdapContext;
+import javax.naming.ldap.LdapName;
+import javax.naming.ldap.Rdn;
+import java.text.MessageFormat;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * LDAP implementation of the GroupProvider interface.  All data in the directory is treated as
@@ -76,15 +74,15 @@ public class LdapGroupProvider extends AbstractGroupProvider {
     public Group getGroup(String groupName) throws GroupNotFoundException {
         LdapContext ctx = null;
         try {
-            String groupDN = manager.findGroupDN(groupName);
+            Rdn[] groupRDN = manager.findGroupRDN(groupName);
             // Load record.
             ctx = manager.getContext(manager.getGroupsBaseDN(groupName));
-            Attributes attrs = ctx.getAttributes(groupDN, standardAttributes);
+            Attributes attrs = ctx.getAttributes(LdapManager.escapeForJNDI(groupRDN), standardAttributes);
 
             return processGroup(ctx, attrs);
         }
         catch (Exception e) {
-            Log.error(e.getMessage(), e);
+            Log.error("Unable to load group: {}", groupName, e);
             throw new GroupNotFoundException("Group with name " + groupName + " not found.", e);
         }
         finally {
@@ -145,7 +143,12 @@ public class LdapGroupProvider extends AbstractGroupProvider {
             }
             username = JID.unescapeNode(user.getNode());
             try {
-                username = manager.findUserDN(username) + "," + manager.getUsersBaseDN(username);
+                final String relativePart =
+                    Arrays.stream(manager.findUserRDN(username))
+                    .map(Rdn::toString)
+                    .collect(Collectors.joining(","));
+
+                username = relativePart + "," + manager.getUsersBaseDN(username);
             }
             catch (Exception e) {
                 Log.error("Could not find user in LDAP " + username);
@@ -167,7 +170,7 @@ public class LdapGroupProvider extends AbstractGroupProvider {
         StringBuilder filter = new StringBuilder();
         filter.append("(&");
         filter.append(MessageFormat.format(manager.getGroupSearchFilter(), "*"));
-        filter.append('(').append(key).append('=').append(LdapManager.sanitizeSearchFilter(value));
+        filter.append('(').append(key).append('=').append(LdapManager.sanitizeSearchFilter(value, false));
         filter.append("))");
         if (Log.isDebugEnabled()) {
             Log.debug("Trying to find group names using query: " + filter.toString());
@@ -196,7 +199,7 @@ public class LdapGroupProvider extends AbstractGroupProvider {
         // Make the query be a wildcard search by default. So, if the user searches for
         // "Test", make the sanitized search be "Test*" instead.
         filter.append('(').append(manager.getGroupNameField()).append('=')
-                .append(LdapManager.sanitizeSearchFilter(query)).append("*)");
+                .append(LdapManager.sanitizeSearchFilter(query, false)).append("*)");
         // Perform the LDAP query
         return manager.retrieveList(
                 manager.getGroupNameField(),
